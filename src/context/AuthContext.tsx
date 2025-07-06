@@ -1,79 +1,87 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiService } from '../services/api';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { User } from '@supabase/supabase-js'
+import { supabaseApi } from '../services/supabaseApi'
+import type { Database } from '../lib/supabase'
 
-interface User {
-  id: string;
-  email: string;
-  name: string;
-}
+type UserProfile = Database['public']['Tables']['users']['Row']
 
 interface AuthContextType {
-  user: User | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
-  logout: () => void;
+  user: UserProfile | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  login: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, name: string) => Promise<void>
+  logout: () => Promise<void>
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
+  const context = useContext(AuthContext)
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth must be used within an AuthProvider')
   }
-  return context;
-};
+  return context
+}
 
 interface AuthProviderProps {
-  children: ReactNode;
+  children: ReactNode
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<UserProfile | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (apiService.isAuthenticated()) {
-          const profile = await apiService.getUserProfile();
-          setUser(profile);
+        const currentUser = await supabaseApi.getCurrentUser()
+        if (currentUser) {
+          const profile = await supabaseApi.getUserProfile(currentUser.id)
+          setUser(profile)
         }
       } catch (error) {
-        console.error('Auth initialization failed:', error);
-        apiService.removeToken();
+        console.error('Auth initialization failed:', error)
       } finally {
-        setIsLoading(false);
+        setIsLoading(false)
       }
-    };
+    }
 
-    initAuth();
-  }, []);
+    initAuth()
+  }, [])
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await apiService.login({ email, password });
-      setUser(response.user);
-    } catch (error) {
-      throw error;
+      const { user: authUser } = await supabaseApi.signIn(email, password)
+      if (authUser) {
+        const profile = await supabaseApi.getUserProfile(authUser.id)
+        setUser(profile)
+      }
+    } catch (error: any) {
+      throw new Error(error.message || 'Login failed')
     }
-  };
+  }
 
   const register = async (email: string, password: string, name: string) => {
     try {
-      const response = await apiService.register({ email, password, name });
-      setUser(response.user);
-    } catch (error) {
-      throw error;
+      const { user: authUser } = await supabaseApi.signUp(email, password, name)
+      if (authUser) {
+        const profile = await supabaseApi.getUserProfile(authUser.id)
+        setUser(profile)
+      }
+    } catch (error: any) {
+      throw new Error(error.message || 'Registration failed')
     }
-  };
+  }
 
-  const logout = () => {
-    apiService.removeToken();
-    setUser(null);
-  };
+  const logout = async () => {
+    try {
+      await supabaseApi.signOut()
+      setUser(null)
+    } catch (error) {
+      console.error('Logout failed:', error)
+    }
+  }
 
   const value: AuthContextType = {
     user,
@@ -82,7 +90,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     register,
     logout,
-  };
+  }
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}

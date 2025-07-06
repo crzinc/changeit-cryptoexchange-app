@@ -1,51 +1,119 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, Search, TrendingUp, TrendingDown, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowUpDown, Search, TrendingUp, TrendingDown, ChevronDown } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { supabaseApi } from '../services/supabaseApi'
+import type { Database } from '../lib/supabase'
 
-const currencies = [
-  { symbol: 'BTC', name: 'Bitcoin', price: 65430, change: 2.5, color: 'bg-orange-500' },
-  { symbol: 'ETH', name: 'Ethereum', price: 3200, change: 1.8, color: 'bg-blue-500' },
-  { symbol: 'USDT', name: 'Tether', price: 1, change: 0.1, color: 'bg-green-500' },
-  { symbol: 'BNB', name: 'Binance Coin', price: 520, change: -0.8, color: 'bg-yellow-500' },
-  { symbol: 'XRP', name: 'Ripple', price: 0.62, change: 3.2, color: 'bg-blue-400' },
-  { symbol: 'ADA', name: 'Cardano', price: 0.45, change: 1.5, color: 'bg-purple-500' },
-  { symbol: 'SOL', name: 'Solana', price: 95, change: 4.2, color: 'bg-gradient-to-r from-purple-500 to-pink-500' },
-  { symbol: 'DOT', name: 'Polkadot', price: 8.5, change: -1.2, color: 'bg-pink-500' },
-];
+type MarketData = Database['public']['Tables']['market_data']['Row']
 
 const ExchangeForm = () => {
-  const [fromCurrency, setFromCurrency] = useState(currencies[0]);
-  const [toCurrency, setToCurrency] = useState(currencies[2]);
-  const [fromAmount, setFromAmount] = useState('1.0');
-  const [toAmount, setToAmount] = useState('65430.00');
-  const [showFromDropdown, setShowFromDropdown] = useState(false);
-  const [showToDropdown, setShowToDropdown] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const { isAuthenticated, user } = useAuth()
+  const [marketData, setMarketData] = useState<MarketData[]>([])
+  const [fromCurrency, setFromCurrency] = useState<MarketData | null>(null)
+  const [toCurrency, setToCurrency] = useState<MarketData | null>(null)
+  const [fromAmount, setFromAmount] = useState('1.0')
+  const [toAmount, setToAmount] = useState('0.00')
+  const [showFromDropdown, setShowFromDropdown] = useState(false)
+  const [showToDropdown, setShowToDropdown] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [exchangeRate, setExchangeRate] = useState(0)
 
-  const filteredCurrencies = currencies.filter(currency =>
+  useEffect(() => {
+    const fetchMarketData = async () => {
+      try {
+        const data = await supabaseApi.getMarketData()
+        setMarketData(data)
+        
+        // Set default currencies
+        const btc = data.find(d => d.symbol === 'BTC')
+        const usdt = data.find(d => d.symbol === 'USDT')
+        if (btc && usdt) {
+          setFromCurrency(btc)
+          setToCurrency(usdt)
+        }
+      } catch (error) {
+        console.error('Failed to fetch market data:', error)
+      }
+    }
+
+    fetchMarketData()
+
+    // Subscribe to real-time market data updates
+    const subscription = supabaseApi.subscribeToMarketData(setMarketData)
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    const updateExchangeRate = async () => {
+      if (!fromCurrency || !toCurrency) return
+
+      try {
+        const rate = await supabaseApi.getExchangeRate(fromCurrency.symbol, toCurrency.symbol)
+        setExchangeRate(rate)
+        
+        const amount = parseFloat(fromAmount) || 0
+        setToAmount((amount * rate).toFixed(6))
+      } catch (error) {
+        console.error('Failed to get exchange rate:', error)
+        setExchangeRate(0)
+        setToAmount('0.00')
+      }
+    }
+
+    updateExchangeRate()
+  }, [fromCurrency, toCurrency, fromAmount])
+
+  const filteredCurrencies = marketData.filter(currency =>
     currency.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     currency.symbol.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  )
 
   const swapCurrencies = () => {
-    setFromCurrency(toCurrency);
-    setToCurrency(fromCurrency);
-    setFromAmount(toAmount);
-    setToAmount(fromAmount);
-  };
+    if (!fromCurrency || !toCurrency) return
+    
+    setFromCurrency(toCurrency)
+    setToCurrency(fromCurrency)
+    setFromAmount(toAmount)
+  }
 
-  const selectCurrency = (currency: any, type: 'from' | 'to') => {
+  const selectCurrency = (currency: MarketData, type: 'from' | 'to') => {
     if (type === 'from') {
-      setFromCurrency(currency);
-      setShowFromDropdown(false);
+      setFromCurrency(currency)
+      setShowFromDropdown(false)
     } else {
-      setToCurrency(currency);
-      setShowToDropdown(false);
+      setToCurrency(currency)
+      setShowToDropdown(false)
     }
-    setSearchTerm('');
-  };
+    setSearchTerm('')
+  }
 
-  const CurrencyDropdown = ({ currencies, onSelect, isOpen, onClose }: any) => (
+  const handleExchange = async () => {
+    if (!isAuthenticated || !user || !fromCurrency || !toCurrency) {
+      alert('Please sign in to exchange cryptocurrencies')
+      return
+    }
+
+    const amount = parseFloat(fromAmount)
+    if (!amount || amount <= 0) {
+      alert('Please enter a valid amount')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      await supabaseApi.executeExchange(fromCurrency.symbol, toCurrency.symbol, amount)
+      alert('Exchange completed successfully!')
+      setFromAmount('1.0')
+    } catch (error: any) {
+      alert(error.message || 'Exchange failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const CurrencyDropdown = ({ currencies, onSelect, isOpen }: any) => (
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -68,7 +136,7 @@ const ExchangeForm = () => {
             </div>
           </div>
           <div className="max-h-64 overflow-y-auto">
-            {filteredCurrencies.map((currency, index) => (
+            {currencies.map((currency: MarketData, index: number) => (
               <motion.div
                 key={currency.symbol}
                 initial={{ opacity: 0, x: -20 }}
@@ -79,7 +147,7 @@ const ExchangeForm = () => {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center">
-                    <div className={`w-8 h-8 ${currency.color} rounded-full mr-3 flex items-center justify-center`}>
+                    <div className="w-8 h-8 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full mr-3 flex items-center justify-center">
                       <span className="text-white font-bold text-sm">{currency.symbol[0]}</span>
                     </div>
                     <div>
@@ -89,9 +157,9 @@ const ExchangeForm = () => {
                   </div>
                   <div className="text-right">
                     <div className="text-white font-semibold">${currency.price.toLocaleString()}</div>
-                    <div className={`text-sm flex items-center ${currency.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {currency.change >= 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-                      {Math.abs(currency.change)}%
+                    <div className={`text-sm flex items-center ${currency.change_24h >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {currency.change_24h >= 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                      {Math.abs(currency.change_24h).toFixed(2)}%
                     </div>
                   </div>
                 </div>
@@ -101,7 +169,17 @@ const ExchangeForm = () => {
         </motion.div>
       )}
     </AnimatePresence>
-  );
+  )
+
+  if (!fromCurrency || !toCurrency) {
+    return (
+      <section id="exchange" className="py-20 bg-slate-900/50">
+        <div className="container mx-auto px-6 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section id="exchange" className="py-20 bg-slate-900/50">
@@ -143,7 +221,7 @@ const ExchangeForm = () => {
                         onClick={() => setShowFromDropdown(!showFromDropdown)}
                         className="flex items-center bg-slate-600/50 hover:bg-slate-600/70 rounded-xl px-4 py-2 transition-colors duration-200"
                       >
-                        <div className={`w-6 h-6 ${fromCurrency.color} rounded-full mr-2 flex items-center justify-center`}>
+                        <div className="w-6 h-6 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full mr-2 flex items-center justify-center">
                           <span className="text-white font-bold text-xs">{fromCurrency.symbol[0]}</span>
                         </div>
                         <span className="text-white font-semibold mr-2">{fromCurrency.symbol}</span>
@@ -151,14 +229,13 @@ const ExchangeForm = () => {
                       </button>
                       <CurrencyDropdown
                         currencies={filteredCurrencies}
-                        onSelect={(currency: any) => selectCurrency(currency, 'from')}
+                        onSelect={(currency: MarketData) => selectCurrency(currency, 'from')}
                         isOpen={showFromDropdown}
-                        onClose={() => setShowFromDropdown(false)}
                       />
                     </div>
                     <div className="text-right">
-                      <div className="text-white/60 text-sm">Balance</div>
-                      <div className="text-white font-semibold">2.45 {fromCurrency.symbol}</div>
+                      <div className="text-white/60 text-sm">Price</div>
+                      <div className="text-white font-semibold">${fromCurrency.price.toLocaleString()}</div>
                     </div>
                   </div>
                   <input
@@ -193,7 +270,7 @@ const ExchangeForm = () => {
                         onClick={() => setShowToDropdown(!showToDropdown)}
                         className="flex items-center bg-slate-600/50 hover:bg-slate-600/70 rounded-xl px-4 py-2 transition-colors duration-200"
                       >
-                        <div className={`w-6 h-6 ${toCurrency.color} rounded-full mr-2 flex items-center justify-center`}>
+                        <div className="w-6 h-6 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full mr-2 flex items-center justify-center">
                           <span className="text-white font-bold text-xs">{toCurrency.symbol[0]}</span>
                         </div>
                         <span className="text-white font-semibold mr-2">{toCurrency.symbol}</span>
@@ -201,19 +278,19 @@ const ExchangeForm = () => {
                       </button>
                       <CurrencyDropdown
                         currencies={filteredCurrencies}
-                        onSelect={(currency: any) => selectCurrency(currency, 'to')}
+                        onSelect={(currency: MarketData) => selectCurrency(currency, 'to')}
                         isOpen={showToDropdown}
-                        onClose={() => setShowToDropdown(false)}
                       />
                     </div>
                     <div className="text-right">
-                      <div className="text-white/60 text-sm">≈ ${(parseFloat(toAmount) * toCurrency.price).toLocaleString()}</div>
+                      <div className="text-white/60 text-sm">Price</div>
+                      <div className="text-white font-semibold">${toCurrency.price.toLocaleString()}</div>
                     </div>
                   </div>
                   <input
                     type="number"
                     value={toAmount}
-                    onChange={(e) => setToAmount(e.target.value)}
+                    readOnly
                     placeholder="0.00"
                     className="w-full bg-transparent text-3xl font-bold text-white outline-none placeholder-white/40"
                   />
@@ -224,7 +301,9 @@ const ExchangeForm = () => {
               <div className="bg-slate-700/30 rounded-2xl p-4 border border-white/5">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-white/60 text-sm">Rate</span>
-                  <span className="text-white font-semibold">1 {fromCurrency.symbol} = {(toCurrency.price / fromCurrency.price).toFixed(4)} {toCurrency.symbol}</span>
+                  <span className="text-white font-semibold">
+                    1 {fromCurrency.symbol} = {exchangeRate.toFixed(6)} {toCurrency.symbol}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-white/60 text-sm">Network Fee</span>
@@ -240,16 +319,18 @@ const ExchangeForm = () => {
               <motion.button
                 whileHover={{ scale: 1.02, boxShadow: "0 20px 40px rgba(6, 182, 212, 0.4)" }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-2xl text-white font-semibold text-lg hover:from-cyan-400 hover:to-purple-400 transition-all duration-300 shadow-lg"
+                onClick={handleExchange}
+                disabled={isLoading || !isAuthenticated}
+                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-2xl text-white font-semibold text-lg hover:from-cyan-400 hover:to-purple-400 transition-all duration-300 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Exchange Now
+                {isLoading ? 'Processing...' : isAuthenticated ? 'Exchange Now' : 'Sign In to Exchange'}
               </motion.button>
             </div>
           </div>
         </motion.div>
       </div>
     </section>
-  );
-};
+  )
+}
 
-export default ExchangeForm;
+export default ExchangeForm

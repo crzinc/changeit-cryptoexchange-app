@@ -1,26 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import Header from './components/Header';
-import Hero from './components/Hero';
-import ExchangeForm from './components/ExchangeForm';
-import Features from './components/Features';
-import Footer from './components/Footer';
-import ParticleBackground from './components/ParticleBackground';
-import UserDashboard from './components/Dashboard/UserDashboard';
-import { useWebSocket } from './hooks/useWebSocket';
+import React, { useEffect, useState } from 'react'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import Header from './components/Header'
+import Hero from './components/Hero'
+import ExchangeForm from './components/ExchangeForm'
+import Features from './components/Features'
+import Footer from './components/Footer'
+import ParticleBackground from './components/ParticleBackground'
+import UserDashboard from './components/Dashboard/UserDashboard'
+import { supabaseApi } from './services/supabaseApi'
 
 const AppContent = () => {
-  const { isAuthenticated, isLoading } = useAuth();
-  const [marketData, setMarketData] = useState([]);
-  
-  // WebSocket connection for real-time updates
-  const { isConnected, lastMessage } = useWebSocket('ws://localhost:3001');
+  const { isAuthenticated, isLoading } = useAuth()
+  const [marketData, setMarketData] = useState([])
 
   useEffect(() => {
-    if (lastMessage && lastMessage.type === 'MARKET_UPDATE') {
-      setMarketData(lastMessage.data);
-    }
-  }, [lastMessage]);
+    // Subscribe to real-time market data updates
+    const subscription = supabaseApi.subscribeToMarketData(setMarketData)
+    return () => subscription.unsubscribe()
+  }, [])
 
   if (isLoading) {
     return (
@@ -30,7 +27,7 @@ const AppContent = () => {
           <p className="text-white/60">Loading...</p>
         </div>
       </div>
-    );
+    )
   }
 
   if (isAuthenticated) {
@@ -41,14 +38,8 @@ const AppContent = () => {
           <Header />
           <UserDashboard />
         </div>
-        {/* WebSocket Status Indicator */}
-        <div className={`fixed bottom-4 right-4 px-3 py-1 rounded-full text-xs font-medium ${
-          isConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-        }`}>
-          {isConnected ? 'Live' : 'Disconnected'}
-        </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -61,22 +52,16 @@ const AppContent = () => {
         <Features />
         <Footer />
       </div>
-      {/* WebSocket Status Indicator */}
-      <div className={`fixed bottom-4 right-4 px-3 py-1 rounded-full text-xs font-medium ${
-        isConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-      }`}>
-        {isConnected ? 'Live' : 'Disconnected'}
-      </div>
     </div>
-  );
-};
+  )
+}
 
 function App() {
   return (
     <AuthProvider>
       <AppContent />
     </AuthProvider>
-  );
+  )
 }
 
-export default App;
+export default App

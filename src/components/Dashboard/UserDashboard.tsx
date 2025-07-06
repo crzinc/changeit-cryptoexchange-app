@@ -1,51 +1,83 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Wallet, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { apiService } from '../../services/api';
+import React, { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import { Wallet, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft, RefreshCw } from 'lucide-react'
+import { useAuth } from '../../context/AuthContext'
+import { supabaseApi } from '../../services/supabaseApi'
+import type { Database } from '../../lib/supabase'
 
-interface Wallet {
-  id: string;
-  currency: string;
-  balance: number;
-}
-
-interface Transaction {
-  id: string;
-  type: string;
-  from_currency?: string;
-  to_currency?: string;
-  from_amount?: number;
-  to_amount?: number;
-  status: string;
-  created_at: string;
-}
+type Wallet = Database['public']['Tables']['wallets']['Row']
+type Transaction = Database['public']['Tables']['transactions']['Row']
+type MarketData = Database['public']['Tables']['market_data']['Row']
 
 const UserDashboard: React.FC = () => {
-  const { user } = useAuth();
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { user } = useAuth()
+  const [wallets, setWallets] = useState<Wallet[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [marketData, setMarketData] = useState<MarketData[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   useEffect(() => {
+    if (!user) return
+
     const fetchUserData = async () => {
       try {
-        const [walletsData, transactionsData] = await Promise.all([
-          apiService.getUserWallets(),
-          apiService.getUserTransactions(10)
-        ]);
+        const [walletsData, transactionsData, marketDataResponse] = await Promise.all([
+          supabaseApi.getUserWallets(user.id),
+          supabaseApi.getUserTransactions(user.id, 10),
+          supabaseApi.getMarketData()
+        ])
         
-        setWallets(walletsData);
-        setTransactions(transactionsData);
+        setWallets(walletsData)
+        setTransactions(transactionsData)
+        setMarketData(marketDataResponse)
       } catch (error) {
-        console.error('Failed to fetch user data:', error);
+        console.error('Failed to fetch user data:', error)
       } finally {
-        setIsLoading(false);
+        setIsLoading(false)
       }
-    };
+    }
 
-    fetchUserData();
-  }, []);
+    fetchUserData()
+
+    // Subscribe to real-time updates
+    const walletSubscription = supabaseApi.subscribeToUserWallets(user.id, setWallets)
+    const marketSubscription = supabaseApi.subscribeToMarketData(setMarketData)
+
+    return () => {
+      walletSubscription.unsubscribe()
+      marketSubscription.unsubscribe()
+    }
+  }, [user])
+
+  const refreshData = async () => {
+    if (!user) return
+    
+    setIsRefreshing(true)
+    try {
+      const [walletsData, transactionsData] = await Promise.all([
+        supabaseApi.getUserWallets(user.id),
+        supabaseApi.getUserTransactions(user.id, 10)
+      ])
+      
+      setWallets(walletsData)
+      setTransactions(transactionsData)
+    } catch (error) {
+      console.error('Failed to refresh data:', error)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const getMarketPrice = (currency: string): number => {
+    const market = marketData.find(m => m.symbol === currency)
+    return market?.price || 0
+  }
+
+  const getMarketChange = (currency: string): number => {
+    const market = marketData.find(m => m.symbol === currency)
+    return market?.change_24h || 0
+  }
 
   if (isLoading) {
     return (
@@ -56,13 +88,13 @@ const UserDashboard: React.FC = () => {
           className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full"
         />
       </div>
-    );
+    )
   }
 
   const totalBalance = wallets.reduce((sum, wallet) => {
-    // Simple calculation - in production, you'd convert to USD
-    return sum + wallet.balance;
-  }, 0);
+    const price = getMarketPrice(wallet.currency)
+    return sum + (wallet.balance * price)
+  }, 0)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 pt-20">
@@ -70,12 +102,24 @@ const UserDashboard: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-8 flex items-center justify-between"
         >
-          <h1 className="text-3xl font-bold text-white mb-2">
-            Welcome back, {user?.name}!
-          </h1>
-          <p className="text-white/60">Manage your crypto portfolio</p>
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">
+              Welcome back, {user?.name}!
+            </h1>
+            <p className="text-white/60">Manage your crypto portfolio</p>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={refreshData}
+            disabled={isRefreshing}
+            className="flex items-center space-x-2 px-4 py-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full text-white hover:bg-white/20 transition-all duration-300 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </motion.button>
         </motion.div>
 
         {/* Portfolio Overview */}
@@ -83,7 +127,7 @@ const UserDashboard: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid md:grid-cols-3 gap-6 mb-8"
+          className="grid md:grid-cols-4 gap-6 mb-8"
         >
           <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
             <div className="flex items-center justify-between mb-4">
@@ -93,9 +137,9 @@ const UserDashboard: React.FC = () => {
               <TrendingUp className="w-5 h-5 text-green-400" />
             </div>
             <div className="text-2xl font-bold text-white mb-1">
-              {wallets.length}
+              ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <div className="text-white/60 text-sm">Active Wallets</div>
+            <div className="text-white/60 text-sm">Total Portfolio Value</div>
           </div>
 
           <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
@@ -106,9 +150,9 @@ const UserDashboard: React.FC = () => {
               <TrendingUp className="w-5 h-5 text-blue-400" />
             </div>
             <div className="text-2xl font-bold text-white mb-1">
-              {transactions.filter(t => t.status === 'completed').length}
+              {wallets.length}
             </div>
-            <div className="text-white/60 text-sm">Completed Trades</div>
+            <div className="text-white/60 text-sm">Active Wallets</div>
           </div>
 
           <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
@@ -117,6 +161,19 @@ const UserDashboard: React.FC = () => {
                 <Clock className="w-6 h-6 text-white" />
               </div>
               <TrendingUp className="w-5 h-5 text-purple-400" />
+            </div>
+            <div className="text-2xl font-bold text-white mb-1">
+              {transactions.filter(t => t.status === 'completed').length}
+            </div>
+            <div className="text-white/60 text-sm">Completed Trades</div>
+          </div>
+
+          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-12 h-12 bg-gradient-to-r from-cyan-400 to-teal-500 rounded-xl flex items-center justify-center">
+                <ArrowDownLeft className="w-6 h-6 text-white" />
+              </div>
+              <TrendingUp className="w-5 h-5 text-cyan-400" />
             </div>
             <div className="text-2xl font-bold text-white mb-1">
               {transactions.filter(t => t.status === 'pending').length}
@@ -135,35 +192,43 @@ const UserDashboard: React.FC = () => {
           >
             <h2 className="text-xl font-semibold text-white mb-6">Your Wallets</h2>
             <div className="space-y-4">
-              {wallets.map((wallet, index) => (
-                <motion.div
-                  key={wallet.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 + index * 0.05 }}
-                  className="flex items-center justify-between p-4 bg-slate-700/30 rounded-xl hover:bg-slate-700/50 transition-colors duration-200"
-                >
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full flex items-center justify-center mr-3">
-                      <span className="text-white font-bold text-sm">
-                        {wallet.currency[0]}
-                      </span>
-                    </div>
-                    <div>
-                      <div className="text-white font-semibold">{wallet.currency}</div>
-                      <div className="text-white/60 text-sm">
-                        {wallet.balance.toFixed(6)} {wallet.currency}
+              {wallets.map((wallet, index) => {
+                const price = getMarketPrice(wallet.currency)
+                const change = getMarketChange(wallet.currency)
+                const value = wallet.balance * price
+
+                return (
+                  <motion.div
+                    key={wallet.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 + index * 0.05 }}
+                    className="flex items-center justify-between p-4 bg-slate-700/30 rounded-xl hover:bg-slate-700/50 transition-colors duration-200"
+                  >
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full flex items-center justify-center mr-3">
+                        <span className="text-white font-bold text-sm">
+                          {wallet.currency[0]}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="text-white font-semibold">{wallet.currency}</div>
+                        <div className="text-white/60 text-sm">
+                          {wallet.balance.toFixed(6)} {wallet.currency}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-white font-semibold">
-                      ${(wallet.balance * 100).toFixed(2)}
+                    <div className="text-right">
+                      <div className="text-white font-semibold">
+                        ${value.toFixed(2)}
+                      </div>
+                      <div className={`text-sm ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                      </div>
                     </div>
-                    <div className="text-green-400 text-sm">+2.5%</div>
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                )
+              })}
             </div>
           </motion.div>
 
@@ -238,7 +303,7 @@ const UserDashboard: React.FC = () => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default UserDashboard;
+export default UserDashboard
