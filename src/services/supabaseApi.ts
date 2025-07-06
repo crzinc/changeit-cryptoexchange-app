@@ -64,6 +64,12 @@ class SupabaseApiService {
 
   async getCurrentUser() {
     const { data: { user }, error } = await supabase.auth.getUser()
+    
+    // Handle the expected case of missing auth session gracefully
+    if (error && error.message === 'Auth session missing!') {
+      return null
+    }
+    
     if (error) throw error
     return user
   }
