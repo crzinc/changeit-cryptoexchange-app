@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowUpDown, Search, TrendingUp, TrendingDown, ChevronDown } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { supabaseApi } from '../services/supabaseApi'
+import { useRealTimeRates } from '../hooks/useRealTimeRates'
 import type { Database } from '../lib/supabase'
 
 type MarketData = Database['public']['Tables']['market_data']['Row']
 
 const ExchangeForm = () => {
   const { isAuthenticated, user } = useAuth()
-  const [marketData, setMarketData] = useState<MarketData[]>([])
+  const { marketData, getRate, isLoading: ratesLoading } = useRealTimeRates()
   const [fromCurrency, setFromCurrency] = useState<MarketData | null>(null)
   const [toCurrency, setToCurrency] = useState<MarketData | null>(null)
   const [fromAmount, setFromAmount] = useState('1.0')
@@ -19,51 +20,53 @@ const ExchangeForm = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [exchangeRate, setExchangeRate] = useState(0)
+  const [userWallets, setUserWallets] = useState<any[]>([])
 
   useEffect(() => {
-    const fetchMarketData = async () => {
-      try {
-        const data = await supabaseApi.getMarketData()
-        setMarketData(data)
-        
-        // Set default currencies
-        const btc = data.find(d => d.symbol === 'BTC')
-        const usdt = data.find(d => d.symbol === 'USDT')
-        if (btc && usdt) {
-          setFromCurrency(btc)
-          setToCurrency(usdt)
+    if (marketData.length > 0 && !fromCurrency && !toCurrency) {
+      // Set default currencies
+      const btc = marketData.find(d => d.symbol === 'BTC')
+      const usdt = marketData.find(d => d.symbol === 'USDT')
+      if (btc && usdt) {
+        setFromCurrency(btc)
+        setToCurrency(usdt)
+      }
+    }
+  }, [marketData, fromCurrency, toCurrency])
+
+  useEffect(() => {
+    if (user) {
+      const fetchUserWallets = async () => {
+        try {
+          const wallets = await supabaseApi.getUserWallets(user.id)
+          setUserWallets(wallets)
+        } catch (error) {
+          console.error('Failed to fetch user wallets:', error)
         }
-      } catch (error) {
-        console.error('Failed to fetch market data:', error)
       }
+      
+      fetchUserWallets()
+      
+      // Subscribe to wallet updates
+      const subscription = supabaseApi.subscribeToUserWallets(user.id, setUserWallets)
+      return () => subscription.unsubscribe()
     }
-
-    fetchMarketData()
-
-    // Subscribe to real-time market data updates
-    const subscription = supabaseApi.subscribeToMarketData(setMarketData)
-    return () => subscription.unsubscribe()
-  }, [])
+  }, [user])
 
   useEffect(() => {
-    const updateExchangeRate = async () => {
-      if (!fromCurrency || !toCurrency) return
+    if (!fromCurrency || !toCurrency) return
 
-      try {
-        const rate = await supabaseApi.getExchangeRate(fromCurrency.symbol, toCurrency.symbol)
-        setExchangeRate(rate)
-        
-        const amount = parseFloat(fromAmount) || 0
-        setToAmount((amount * rate).toFixed(6))
-      } catch (error) {
-        console.error('Failed to get exchange rate:', error)
-        setExchangeRate(0)
-        setToAmount('0.00')
-      }
-    }
+    const rate = getRate(fromCurrency.symbol, toCurrency.symbol)
+    setExchangeRate(rate)
+    
+    const amount = parseFloat(fromAmount) || 0
+    setToAmount((amount * rate).toFixed(8))
+  }, [fromCurrency, toCurrency, fromAmount, getRate])
 
-    updateExchangeRate()
-  }, [fromCurrency, toCurrency, fromAmount])
+  const getUserBalance = (currency: string): number => {
+    const wallet = userWallets.find(w => w.currency === currency)
+    return wallet ? parseFloat(wallet.balance.toString()) : 0
+  }
 
   const filteredCurrencies = marketData.filter(currency =>
     currency.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -98,6 +101,12 @@ const ExchangeForm = () => {
     const amount = parseFloat(fromAmount)
     if (!amount || amount <= 0) {
       alert('Please enter a valid amount')
+      return
+    }
+
+    const userBalance = getUserBalance(fromCurrency.symbol)
+    if (amount > userBalance) {
+      alert('Insufficient balance')
       return
     }
 
@@ -171,7 +180,7 @@ const ExchangeForm = () => {
     </AnimatePresence>
   )
 
-  if (!fromCurrency || !toCurrency) {
+  if (ratesLoading || !fromCurrency || !toCurrency) {
     return (
       <section id="exchange" className="py-20 bg-slate-900/50">
         <div className="container mx-auto px-6 flex items-center justify-center">
@@ -238,11 +247,18 @@ const ExchangeForm = () => {
                       <div className="text-white font-semibold">${fromCurrency.price.toLocaleString()}</div>
                     </div>
                   </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-white/60 text-sm">Available</span>
+                    <span className="text-white/80 text-sm">
+                      {getUserBalance(fromCurrency.symbol).toFixed(6)} {fromCurrency.symbol}
+                    </span>
+                  </div>
                   <input
                     type="number"
                     value={fromAmount}
                     onChange={(e) => setFromAmount(e.target.value)}
                     placeholder="0.00"
+                    max={getUserBalance(fromCurrency.symbol)}
                     className="w-full bg-transparent text-3xl font-bold text-white outline-none placeholder-white/40"
                   />
                 </div>
@@ -302,16 +318,16 @@ const ExchangeForm = () => {
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-white/60 text-sm">Rate</span>
                   <span className="text-white font-semibold">
-                    1 {fromCurrency.symbol} = {exchangeRate.toFixed(6)} {toCurrency.symbol}
+                    1 {fromCurrency.symbol} = {exchangeRate.toFixed(8)} {toCurrency.symbol}
                   </span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-white/60 text-sm">Network Fee</span>
-                  <span className="text-green-400 font-semibold">Free</span>
+                  <span className="text-white/60 font-semibold">0.1%</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-white/60 text-sm">Processing Time</span>
-                  <span className="text-white font-semibold">~2 minutes</span>
+                  <span className="text-white font-semibold">Instant</span>
                 </div>
               </div>
 

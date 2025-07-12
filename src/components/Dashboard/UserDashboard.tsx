@@ -3,17 +3,17 @@ import { motion } from 'framer-motion'
 import { Wallet, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft, RefreshCw } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabaseApi } from '../../services/supabaseApi'
+import { useRealTimeRates } from '../../hooks/useRealTimeRates'
 import type { Database } from '../../lib/supabase'
 
 type Wallet = Database['public']['Tables']['wallets']['Row']
 type Transaction = Database['public']['Tables']['transactions']['Row']
-type MarketData = Database['public']['Tables']['market_data']['Row']
 
 const UserDashboard: React.FC = () => {
   const { user } = useAuth()
+  const { marketData, getRate } = useRealTimeRates()
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [marketData, setMarketData] = useState<MarketData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -22,15 +22,13 @@ const UserDashboard: React.FC = () => {
 
     const fetchUserData = async () => {
       try {
-        const [walletsData, transactionsData, marketDataResponse] = await Promise.all([
+        const [walletsData, transactionsData] = await Promise.all([
           supabaseApi.getUserWallets(user.id),
-          supabaseApi.getUserTransactions(user.id, 10),
-          supabaseApi.getMarketData()
+          supabaseApi.getUserTransactions(user.id, 10)
         ])
         
         setWallets(walletsData)
         setTransactions(transactionsData)
-        setMarketData(marketDataResponse)
       } catch (error) {
         console.error('Failed to fetch user data:', error)
       } finally {
@@ -42,11 +40,11 @@ const UserDashboard: React.FC = () => {
 
     // Subscribe to real-time updates
     const walletSubscription = supabaseApi.subscribeToUserWallets(user.id, setWallets)
-    const marketSubscription = supabaseApi.subscribeToMarketData(setMarketData)
+    const transactionSubscription = supabaseApi.subscribeToUserTransactions(user.id, setTransactions)
 
     return () => {
       walletSubscription.unsubscribe()
-      marketSubscription.unsubscribe()
+      transactionSubscription.unsubscribe()
     }
   }, [user])
 
@@ -71,7 +69,7 @@ const UserDashboard: React.FC = () => {
 
   const getMarketPrice = (currency: string): number => {
     const market = marketData.find(m => m.symbol === currency)
-    return market?.price || 0
+    return market?.price_usd || 0
   }
 
   const getMarketChange = (currency: string): number => {
@@ -93,7 +91,7 @@ const UserDashboard: React.FC = () => {
 
   const totalBalance = wallets.reduce((sum, wallet) => {
     const price = getMarketPrice(wallet.currency)
-    return sum + (wallet.balance * price)
+    return sum + (parseFloat(wallet.balance.toString()) * price)
   }, 0)
 
   return (
@@ -195,7 +193,7 @@ const UserDashboard: React.FC = () => {
               {wallets.map((wallet, index) => {
                 const price = getMarketPrice(wallet.currency)
                 const change = getMarketChange(wallet.currency)
-                const value = wallet.balance * price
+                const value = parseFloat(wallet.balance.toString()) * price
 
                 return (
                   <motion.div
@@ -214,7 +212,7 @@ const UserDashboard: React.FC = () => {
                       <div>
                         <div className="text-white font-semibold">{wallet.currency}</div>
                         <div className="text-white/60 text-sm">
-                          {wallet.balance.toFixed(6)} {wallet.currency}
+                          {parseFloat(wallet.balance.toString()).toFixed(6)} {wallet.currency}
                         </div>
                       </div>
                     </div>
@@ -258,7 +256,7 @@ const UserDashboard: React.FC = () => {
                       }`}>
                         {transaction.type === 'exchange' ? (
                           <ArrowUpRight className="w-5 h-5" />
-                        ) : (
+                            {parseFloat(transaction.from_amount.toString()).toFixed(6)}
                           <ArrowDownLeft className="w-5 h-5" />
                         )}
                       </div>

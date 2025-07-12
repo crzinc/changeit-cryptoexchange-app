@@ -6,6 +6,8 @@ type User = Tables['users']['Row']
 type Wallet = Tables['wallets']['Row']
 type Transaction = Tables['transactions']['Row']
 type MarketData = Tables['market_data']['Row']
+type ExchangeRate = Tables['exchange_rates']['Row']
+type PriceHistory = Tables['price_history']['Row']
 
 class SupabaseApiService {
   // Auth methods
@@ -29,12 +31,22 @@ class SupabaseApiService {
 
       if (profileError) throw profileError
 
-      // Create default wallets
-      const defaultCurrencies = ['BTC', 'ETH', 'USDT', 'BNB', 'XRP', 'ADA', 'SOL', 'DOT']
-      const wallets = defaultCurrencies.map(currency => ({
+      // Create default wallets with demo balances
+      const defaultCurrencies = [
+        { currency: 'BTC', balance: 0.5 },
+        { currency: 'ETH', balance: 2.0 },
+        { currency: 'USDT', balance: 10000 },
+        { currency: 'BNB', balance: 5.0 },
+        { currency: 'XRP', balance: 1000 },
+        { currency: 'ADA', balance: 500 },
+        { currency: 'SOL', balance: 10 },
+        { currency: 'DOT', balance: 50 }
+      ]
+
+      const wallets = defaultCurrencies.map(({ currency, balance }) => ({
         user_id: authData.user!.id,
         currency,
-        balance: currency === 'USDT' ? 10000 : Math.random() * 10, // Demo balances
+        balance,
       }))
 
       const { error: walletsError } = await supabase
@@ -65,7 +77,6 @@ class SupabaseApiService {
   async getCurrentUser() {
     const { data: { user }, error } = await supabase.auth.getUser()
     
-    // Handle the expected case of missing auth session gracefully
     if (error && error.message === 'Auth session missing!') {
       return null
     }
@@ -85,10 +96,13 @@ class SupabaseApiService {
     return data
   }
 
-  async updateUserProfile(userId: string, updates: Partial<Pick<User, 'name'>>) {
+  async updateUserProfile(userId: string, updates: Partial<Pick<User, 'name' | 'avatar_url'>>) {
     const { data, error } = await supabase
       .from('users')
-      .update(updates)
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', userId)
       .select()
       .single()
@@ -109,6 +123,18 @@ class SupabaseApiService {
     return data || []
   }
 
+  async getWalletBalance(userId: string, currency: string): Promise<number> {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('balance')
+      .eq('user_id', userId)
+      .eq('currency', currency)
+      .single()
+
+    if (error) throw error
+    return parseFloat(data.balance.toString())
+  }
+
   // Transaction methods
   async getUserTransactions(userId: string, limit = 50, offset = 0): Promise<Transaction[]> {
     const { data, error } = await supabase
@@ -120,6 +146,17 @@ class SupabaseApiService {
 
     if (error) throw error
     return data || []
+  }
+
+  async getTransactionById(transactionId: string): Promise<Transaction> {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('id', transactionId)
+      .single()
+
+    if (error) throw error
+    return data
   }
 
   async executeExchange(fromCurrency: string, toCurrency: string, fromAmount: number) {
@@ -152,7 +189,8 @@ class SupabaseApiService {
     const { data, error } = await supabase
       .from('market_data')
       .select('*')
-      .order('market_cap', { ascending: false })
+      .eq('is_active', true)
+      .order('rank')
 
     if (error) throw error
     return data || []
@@ -163,6 +201,7 @@ class SupabaseApiService {
       .from('market_data')
       .select('*')
       .eq('symbol', symbol.toUpperCase())
+      .eq('is_active', true)
       .single()
 
     if (error) throw error
@@ -173,6 +212,7 @@ class SupabaseApiService {
     const { data, error } = await supabase
       .from('market_data')
       .select('*')
+      .eq('is_active', true)
       .gt('change_24h', 0)
       .order('change_24h', { ascending: false })
       .limit(10)
@@ -181,6 +221,22 @@ class SupabaseApiService {
     return data || []
   }
 
+  async getPriceHistory(symbol: string, hours = 24): Promise<PriceHistory[]> {
+    const startTime = new Date()
+    startTime.setHours(startTime.getHours() - hours)
+
+    const { data, error } = await supabase
+      .from('price_history')
+      .select('*')
+      .eq('symbol', symbol)
+      .gte('timestamp', startTime.toISOString())
+      .order('timestamp')
+
+    if (error) throw error
+    return data || []
+  }
+
+  // Exchange rate methods
   async getExchangeRate(fromCurrency: string, toCurrency: string): Promise<number> {
     if (fromCurrency === toCurrency) return 1
 
@@ -207,6 +263,16 @@ class SupabaseApiService {
     return data.rate
   }
 
+  async getAllExchangeRates(): Promise<ExchangeRate[]> {
+    const { data, error } = await supabase
+      .from('exchange_rates')
+      .select('*')
+      .order('updated_at', { ascending: false })
+
+    if (error) throw error
+    return data || []
+  }
+
   // Real-time subscriptions
   subscribeToMarketData(callback: (data: MarketData[]) => void) {
     return supabase
@@ -220,6 +286,24 @@ class SupabaseApiService {
         },
         async () => {
           const data = await this.getMarketData()
+          callback(data)
+        }
+      )
+      .subscribe()
+  }
+
+  subscribeToExchangeRates(callback: (data: ExchangeRate[]) => void) {
+    return supabase
+      .channel('exchange_rates_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'exchange_rates',
+        },
+        async () => {
+          const data = await this.getAllExchangeRates()
           callback(data)
         }
       )
@@ -243,6 +327,62 @@ class SupabaseApiService {
         }
       )
       .subscribe()
+  }
+
+  subscribeToUserTransactions(userId: string, callback: (data: Transaction[]) => void) {
+    return supabase
+      .channel('transaction_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${userId}`,
+        },
+        async () => {
+          const data = await this.getUserTransactions(userId, 50)
+          callback(data)
+        }
+      )
+      .subscribe()
+  }
+
+  // Utility methods
+  async triggerMarketUpdate() {
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-updates`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to trigger market update')
+    }
+
+    return response.json()
+  }
+
+  async getPriceFeed(symbols?: string[]) {
+    const url = new URL(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-feed`)
+    if (symbols && symbols.length > 0) {
+      url.searchParams.set('symbols', symbols.join(','))
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch price feed')
+    }
+
+    return response.json()
   }
 }
 
