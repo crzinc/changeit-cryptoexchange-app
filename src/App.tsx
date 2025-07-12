@@ -1,55 +1,59 @@
 import React, { useEffect, useState } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Header from './components/Header'
-import Hero from './components/Hero'
-import ExchangeForm from './components/ExchangeForm'
-import Features from './components/Features'
 import Footer from './components/Footer'
 import ParticleBackground from './components/ParticleBackground'
-import UserDashboard from './components/Dashboard/UserDashboard'
-import { supabaseApi } from './services/supabaseApi'
+import LoadingSpinner from './components/LoadingSpinner'
+
+// Pages
+import HomePage from './pages/HomePage'
+import ExchangePage from './pages/ExchangePage'
+import MarketsPage from './pages/MarketsPage'
+import DashboardPage from './pages/DashboardPage'
+import ProfilePage from './pages/ProfilePage'
+import TransactionsPage from './pages/TransactionsPage'
+import AboutPage from './pages/AboutPage'
+import SupportPage from './pages/SupportPage'
+import NotFoundPage from './pages/NotFoundPage'
 
 const AppContent = () => {
   const { isAuthenticated, isLoading } = useAuth()
-  const [marketData, setMarketData] = useState([])
-
-  useEffect(() => {
-    // Subscribe to real-time market data updates
-    const subscription = supabaseApi.subscribeToMarketData(setMarketData)
-    return () => subscription.unsubscribe()
-  }, [])
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-white/60">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (isAuthenticated) {
-    return (
-      <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
-        <ParticleBackground />
-        <div className="relative z-10">
-          <Header />
-          <UserDashboard />
-        </div>
-      </div>
-    )
+    return <LoadingSpinner />
   }
 
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
       <ParticleBackground />
-      <div className="relative z-10">
+      <div className="relative z-10 flex flex-col min-h-screen">
         <Header />
-        <Hero />
-        <ExchangeForm />
-        <Features />
+        <main className="flex-1">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/exchange" element={<ExchangePage />} />
+            <Route path="/markets" element={<MarketsPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/support" element={<SupportPage />} />
+            
+            {/* Protected Routes */}
+            <Route 
+              path="/dashboard" 
+              element={isAuthenticated ? <DashboardPage /> : <Navigate to="/" />} 
+            />
+            <Route 
+              path="/profile" 
+              element={isAuthenticated ? <ProfilePage /> : <Navigate to="/" />} 
+            />
+            <Route 
+              path="/transactions" 
+              element={isAuthenticated ? <TransactionsPage /> : <Navigate to="/" />} 
+            />
+            
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </main>
         <Footer />
       </div>
     </div>
@@ -59,7 +63,9 @@ const AppContent = () => {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <Router>
+        <AppContent />
+      </Router>
     </AuthProvider>
   )
 }

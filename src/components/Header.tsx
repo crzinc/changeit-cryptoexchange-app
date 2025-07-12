@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowRightLeft, TrendingUp, Menu, X, User, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import AuthModal from './Auth/AuthModal';
@@ -9,6 +10,7 @@ const Header = () => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const location = useLocation();
   
   const { user, isAuthenticated, logout } = useAuth();
 
@@ -22,6 +24,18 @@ const Header = () => {
     setShowUserMenu(false);
   };
 
+  const navItems = [
+    { name: 'Exchange', path: '/exchange' },
+    { name: 'Markets', path: '/markets' },
+    { name: 'About', path: '/about' },
+    { name: 'Support', path: '/support' }
+  ];
+
+  const userNavItems = [
+    { name: 'Dashboard', path: '/dashboard' },
+    { name: 'Profile', path: '/profile' },
+    { name: 'Transactions', path: '/transactions' }
+  ];
   return (
     <>
       <motion.header
@@ -34,8 +48,9 @@ const Header = () => {
           <div className="flex items-center justify-between">
             <motion.div
               whileHover={{ scale: 1.05 }}
-              className="flex items-center space-x-2"
+              className="flex items-center space-x-2 cursor-pointer"
             >
+              <Link to="/" className="flex items-center space-x-2">
               <div className="relative">
                 <ArrowRightLeft className="w-8 h-8 text-cyan-400" />
                 <motion.div
@@ -47,20 +62,26 @@ const Header = () => {
               <span className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
                 Changeit
               </span>
+              </Link>
             </motion.div>
 
             <nav className="hidden md:flex items-center space-x-8">
-              {['Exchange', 'Markets', 'About', 'Support'].map((item, index) => (
+              {navItems.map((item, index) => (
                 <motion.a
-                  key={item}
-                  href={`#${item.toLowerCase()}`}
+                  key={item.name}
+                  as={Link}
+                  to={item.path}
                   initial={{ y: -20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: index * 0.1 + 0.3 }}
                   whileHover={{ y: -2 }}
-                  className="text-white/80 hover:text-white transition-colors duration-300 font-medium"
+                  className={`transition-colors duration-300 font-medium ${
+                    location.pathname === item.path 
+                      ? 'text-cyan-400' 
+                      : 'text-white/80 hover:text-white'
+                  }`}
                 >
-                  {item}
+                  {item.name}
                 </motion.a>
               ))}
             </nav>
@@ -85,6 +106,21 @@ const Header = () => {
                       className="absolute right-0 mt-2 w-48 bg-slate-800/90 backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl overflow-hidden"
                     >
                       <div className="p-2">
+                        {userNavItems.map((navItem) => (
+                          <Link
+                            key={navItem.name}
+                            to={navItem.path}
+                            onClick={() => setShowUserMenu(false)}
+                            className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                              location.pathname === navItem.path
+                                ? 'text-cyan-400 bg-cyan-400/10'
+                                : 'text-white/80 hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            <span>{navItem.name}</span>
+                          </Link>
+                        ))}
+                        <div className="border-t border-white/10 my-2" />
                         <button
                           onClick={handleLogout}
                           className="w-full flex items-center space-x-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors duration-200"
@@ -125,6 +161,86 @@ const Header = () => {
               {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
           </div>
+
+          {/* Mobile Menu */}
+          {isMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden mt-4 pb-4 border-t border-white/10"
+            >
+              <div className="flex flex-col space-y-4 pt-4">
+                {navItems.map((item) => (
+                  <Link
+                    key={item.name}
+                    to={item.path}
+                    onClick={() => setIsMenuOpen(false)}
+                    className={`transition-colors duration-300 font-medium ${
+                      location.pathname === item.path 
+                        ? 'text-cyan-400' 
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                  >
+                    {item.name}
+                  </Link>
+                ))}
+                
+                {isAuthenticated && (
+                  <>
+                    <div className="border-t border-white/10 my-2" />
+                    {userNavItems.map((navItem) => (
+                      <Link
+                        key={navItem.name}
+                        to={navItem.path}
+                        onClick={() => setIsMenuOpen(false)}
+                        className={`transition-colors duration-300 font-medium ${
+                          location.pathname === navItem.path 
+                            ? 'text-cyan-400' 
+                            : 'text-white/80 hover:text-white'
+                        }`}
+                      >
+                        {navItem.name}
+                      </Link>
+                    ))}
+                    <button
+                      onClick={() => {
+                        handleLogout()
+                        setIsMenuOpen(false)
+                      }}
+                      className="text-left text-white/80 hover:text-white transition-colors duration-300 font-medium"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                )}
+                
+                {!isAuthenticated && (
+                  <>
+                    <div className="border-t border-white/10 my-2" />
+                    <button
+                      onClick={() => {
+                        openAuthModal('login')
+                        setIsMenuOpen(false)
+                      }}
+                      className="text-left text-white/80 hover:text-white transition-colors duration-300 font-medium"
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      onClick={() => {
+                        openAuthModal('register')
+                        setIsMenuOpen(false)
+                      }}
+                      className="text-left text-cyan-400 hover:text-cyan-300 transition-colors duration-300 font-medium"
+                    >
+                      Get Started
+                    </button>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
         </div>
       </motion.header>
 
