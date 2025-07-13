@@ -268,7 +268,7 @@ const TransactionsPage: React.FC = () => {
                           </div>
                         )}
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))}
                 </tbody>
               </table>

@@ -255,9 +255,13 @@ const UserDashboard: React.FC = () => {
                           : 'bg-green-500/20 text-green-400'
                       }`}>
                         {transaction.type === 'exchange' ? (
-                          <ArrowUpRight className="w-5 h-5" />
-                            {parseFloat(transaction.from_amount.toString()).toFixed(6)}
-                          <ArrowDownLeft className="w-5 h-5" />
+                          <>
+                            <ArrowUpRight className="w-5 h-5" />
+                            <span className="mx-1 text-xs">
+                              {transaction.from_amount ? parseFloat(transaction.from_amount.toString()).toFixed(6) : '0'}
+                            </span>
+                            <ArrowDownLeft className="w-5 h-5" />
+                          </>
                         )}
                       </div>
                       <div>
