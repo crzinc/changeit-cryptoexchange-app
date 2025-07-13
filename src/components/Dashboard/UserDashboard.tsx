@@ -262,7 +262,7 @@ const UserDashboard: React.FC = () => {
                             </span>
                             <ArrowDownLeft className="w-5 h-5" />
                           </>
-                        )}
+                        ) : <></>}
                       </div>
                       <div>
                         <div className="text-white font-semibold capitalize">
